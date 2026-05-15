@@ -95,6 +95,16 @@
                 <textarea id="url-input" class="w-full bg-transparent border-none focus:ring-0 text-sm h-24 placeholder-gray-300 resize-none" placeholder="粘贴链接或分享口令..."></textarea>
             </div>
 
+            <div id="manual-input-panel" class="hidden mb-6">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-black text-gray-700">正文/摘录</span>
+                    <span class="text-[10px] font-bold text-gray-400">公众号、小红书读不到时填写</span>
+                </div>
+                <div class="bg-blue-50 rounded-3xl p-5 border border-blue-100 focus-within:border-blue-400 transition-all">
+                    <textarea id="manual-text-input" class="w-full bg-transparent border-none focus:ring-0 text-sm h-32 placeholder-blue-300 resize-none" placeholder="粘贴文章正文、分享文案或你想保留的重点摘录..."></textarea>
+                </div>
+            </div>
+
             <p id="status-message" class="hidden text-center text-xs font-bold text-blue-500 mb-4"></p>
             <button id="submit-btn" class="w-full bg-blue-500 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all flex items-center justify-center space-x-2">
                 <i class="fa-solid fa-bolt-lightning"></i>
@@ -143,6 +153,8 @@
         function closeAddModal() {
             document.getElementById('add-modal').classList.add('hidden');
             document.getElementById('url-input').value = '';
+            document.getElementById('manual-text-input').value = '';
+            document.getElementById('manual-input-panel').classList.add('hidden');
             setStatus('');
             setSubmitBusy(false);
         }
@@ -191,6 +203,29 @@
             if (embedded) return embedded;
             if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i.test(trimmed)) return `https://${trimmed}`;
             return '';
+        }
+
+        function textWithoutUrl(rawInput, url) {
+            return String(rawInput || '')
+                .replace(url || '', '')
+                .replace(/https?:\/\/[^\s，。；,;]+/ig, '')
+                .replace(/先复制再进入【?小红书】?.*$/s, '')
+                .trim();
+        }
+
+        function isRestrictedSource(url) {
+            try {
+                const host = new URL(url).hostname;
+                return host.includes('mp.weixin.qq.com') || host.includes('xhslink') || host.includes('xiaohongshu');
+            } catch {
+                return false;
+            }
+        }
+
+        function revealManualInput(message) {
+            document.getElementById('manual-input-panel').classList.remove('hidden');
+            setStatus(message || '这个平台没有返回正文，请粘贴正文或重点摘录后再生成。', true);
+            setTimeout(() => document.getElementById('manual-text-input').focus(), 80);
         }
 
         function escapeHtml(value) {
@@ -252,7 +287,9 @@
                 return api(path, options, false);
             }
             if (!response.ok) {
-                throw new Error(payload.detail || payload.error || '请求失败');
+                const error = new Error(payload.detail || payload.error || '请求失败');
+                error.payload = payload;
+                throw error;
             }
             return payload;
         }
@@ -352,26 +389,37 @@
 
         async function submitContent() {
             const rawInput = document.getElementById('url-input').value;
+            const manualInput = document.getElementById('manual-text-input').value.trim();
             const url = normalizeUrlInput(rawInput);
             if (!url) {
                 setStatus('请输入有效内容链接', true);
                 return;
             }
+            const manualText = manualInput || textWithoutUrl(rawInput, url);
 
             setSubmitBusy(true);
-            setStatus('正在解析链接并生成小结...');
+            setStatus(manualText ? '正在根据正文生成小结...' : '正在解析链接并生成小结...');
             try {
                 const payload = await api('/api/content', {
                     method: 'POST',
-                    body: JSON.stringify({ url, favorite: true }),
+                    body: JSON.stringify({ url, manualText, favorite: true }),
                 });
                 const note = payload.item;
+                if (!manualText && isRestrictedSource(url) && note.parseStatus === 'fallback') {
+                    await api(`/api/notes/${note.id}`, { method: 'DELETE' }).catch(() => {});
+                    revealManualInput('公众号/小红书没有返回正文，请把正文或重点摘录粘到下方再生成。');
+                    return;
+                }
                 state.notes = [note, ...state.notes.filter(item => item.id !== note.id)];
                 addCardToList(viewModel(note));
                 closeAddModal();
                 openDetail(viewModel(note));
             } catch (error) {
-                setStatus(error.message || '解析失败，请稍后再试', true);
+                if (error.payload?.error === 'manual_text_required' || /粘贴正文|直接抓取|没有返回正文/.test(error.message || '')) {
+                    revealManualInput(error.message);
+                } else {
+                    setStatus(error.message || '解析失败，请稍后再试', true);
+                }
             } finally {
                 setSubmitBusy(false);
             }
