@@ -87,6 +87,255 @@ function outputText(payload) {
   return parts.join("\n").trim();
 }
 
+function durableGithubConfig() {
+  const token = String(process.env.GITHUB_TOKEN || "").trim();
+  const repo = String(process.env.GITHUB_REPO || "").trim();
+  const branch = String(process.env.GITHUB_BRANCH || "main").trim() || "main";
+  const dataPath = String(process.env.GITHUB_DATA_PATH || "remote-data/notes.enc.json").trim();
+  const kbPrefix = String(process.env.GITHUB_KB_PREFIX || "kb/智慧笔记摘要本").trim();
+  return { token, repo, branch, dataPath, kbPrefix };
+}
+
+function durableGithubEnabled() {
+  const config = durableGithubConfig();
+  return Boolean(isValidGitHubToken() && config.repo);
+}
+
+function durableGithubHeaders() {
+  const { token } = durableGithubConfig();
+  return {
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+    "x-github-api-version": "2022-11-28",
+    "user-agent": "smart-note-summarizer",
+  };
+}
+
+function durableGithubContentsUrl(filePath) {
+  const { repo } = durableGithubConfig();
+  const encodedPath = String(filePath || "")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `https://api.github.com/repos/${repo}/contents/${encodedPath}`;
+}
+
+function durableEncryptionKey() {
+  const secret = process.env.APP_SECRET || process.env.APP_PASSCODE || "local-dev-secret-change-me";
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function durableEncryptStore(payload) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", durableEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  return {
+    v: 1,
+    alg: "aes-256-gcm",
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    data: encrypted.toString("base64"),
+  };
+}
+
+function durableDecryptStore(payload) {
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    durableEncryptionKey(),
+    Buffer.from(payload.iv, "base64"),
+  );
+  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(payload.data, "base64")),
+    decipher.final(),
+  ]);
+  return JSON.parse(decrypted.toString("utf8"));
+}
+
+async function durableReadGithubFile(filePath) {
+  const { branch } = durableGithubConfig();
+  const response = await fetch(`${durableGithubContentsUrl(filePath)}?ref=${encodeURIComponent(branch)}`, {
+    headers: durableGithubHeaders(),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`github_read_failed_${response.status}`);
+  const payload = await response.json();
+  return {
+    content: Buffer.from(String(payload.content || "").replace(/\s/g, ""), "base64").toString("utf8"),
+    sha: payload.sha,
+  };
+}
+
+async function durableWriteGithubFile(filePath, content, message) {
+  const { branch } = durableGithubConfig();
+  const current = await durableReadGithubFile(filePath);
+  const response = await fetch(durableGithubContentsUrl(filePath), {
+    method: "PUT",
+    headers: {
+      ...durableGithubHeaders(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+      content: Buffer.from(content, "utf8").toString("base64"),
+      branch,
+      ...(current?.sha ? { sha: current.sha } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`github_write_failed_${response.status}`);
+  return response.json();
+}
+
+async function durableReadStore() {
+  const { dataPath } = durableGithubConfig();
+  const remote = await durableReadGithubFile(dataPath);
+  if (!remote) return { notes: [] };
+  return durableDecryptStore(JSON.parse(remote.content));
+}
+
+async function durableWriteStore(store) {
+  const { dataPath } = durableGithubConfig();
+  await durableWriteGithubFile(
+    dataPath,
+    `${JSON.stringify(durableEncryptStore(store), null, 2)}\n`,
+    `Update smart note store ${new Date().toISOString()}`,
+  );
+}
+
+function normalizeStoredTag(tag) {
+  return String(tag || "").replace(/^#/, "").trim().slice(0, 24);
+}
+
+function normalizeStoredPicks(picks = []) {
+  if (!Array.isArray(picks)) return [];
+  const seen = new Set();
+  return picks
+    .map((pick) => cleanText(pick).slice(0, 500))
+    .filter((pick) => {
+      if (!pick || seen.has(pick)) return false;
+      seen.add(pick);
+      return true;
+    })
+    .slice(0, 80);
+}
+
+function normalizeStoredImages(images = []) {
+  if (!Array.isArray(images)) return [];
+  const seen = new Set();
+  return images
+    .map((image) => {
+      if (typeof image === "string") return { url: cleanText(image), alt: "" };
+      return { url: cleanText(image?.url || ""), alt: cleanText(image?.alt || "") };
+    })
+    .filter((image) => {
+      if (!/^https?:\/\//i.test(image.url) || seen.has(image.url)) return false;
+      seen.add(image.url);
+      return true;
+    })
+    .slice(0, 12);
+}
+
+function durableSlugify(input) {
+  return cleanText(input)
+    .replace(/[\\/:*?"<>|#%{}~&]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 60) || "note";
+}
+
+function durableMarkdownForNote(note) {
+  const lines = [
+    "---",
+    `id: ${note.id}`,
+    `type: ${note.type}`,
+    `favorite: ${Boolean(note.favorite)}`,
+    `category: ${note.category || "未分类"}`,
+    `source: ${note.url || ""}`,
+    `created: ${note.createdAt}`,
+    `updated: ${note.updatedAt}`,
+    `tags: [${(note.tags || []).join(", ")}]`,
+    "---",
+    "",
+    `# ${note.title}`,
+    "",
+    "## 小结",
+    "",
+    note.summary || "",
+    "",
+    "## 重点",
+    "",
+    ...(note.keyPoints || []).map((point) => `- ${point}`),
+    "",
+    "## 我的 Pick",
+    "",
+    ...(note.picks || []).map((pick) => `- ${pick}`),
+    "",
+    "## 图片",
+    "",
+    ...(note.images || []).map((image) => `![${image.alt || note.title}](${image.url})`),
+    "",
+    "## 标签",
+    "",
+    (note.tags || []).map((tag) => `#${tag}`).join(" "),
+    "",
+    "## 原文/灵感",
+    "",
+    note.sourceText || note.body || "",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+async function handleDurableNotePatch(req, res, url) {
+  if (!durableGithubEnabled()) return false;
+  const noteMatch = url.pathname.match(/^\/api\/notes\/([^/]+)(?:\/(sync))?$/);
+  if (!noteMatch) return false;
+  const [, id, action] = noteMatch;
+  if (!["PATCH", "POST"].includes(req.method)) return false;
+  if (req.method === "POST" && action !== "sync") return false;
+  if (req.method === "PATCH" && action) return false;
+
+  if (!hasSession(req)) {
+    sendJson(res, 401, { error: "unauthorized", detail: "需要登录后访问" });
+    return true;
+  }
+
+  const store = await durableReadStore();
+  const index = store.notes.findIndex((note) => note.id === id);
+  if (index === -1) {
+    sendJson(res, 404, { error: "not_found" });
+    return true;
+  }
+
+  if (req.method === "PATCH") {
+    const body = await requestBody(req, 1_000_000);
+    const current = store.notes[index];
+    for (const key of ["title", "summary", "category", "favorite", "body", "sourceText"]) {
+      if (Object.hasOwn(body, key)) current[key] = body[key];
+    }
+    if (Array.isArray(body.tags)) current.tags = [...new Set(body.tags.map(normalizeStoredTag).filter(Boolean))];
+    if (Array.isArray(body.images)) current.images = normalizeStoredImages(body.images);
+    if (Array.isArray(body.picks)) current.picks = normalizeStoredPicks(body.picks);
+    current.updatedAt = new Date().toISOString();
+    store.notes[index] = current;
+    await durableWriteStore(store);
+    sendJson(res, 200, { item: current });
+    return true;
+  }
+
+  const { repo, kbPrefix } = durableGithubConfig();
+  const note = store.notes[index];
+  const date = new Date(note.createdAt).toISOString().slice(0, 10);
+  const filename = `${date}_${durableSlugify(note.title)}.md`;
+  const remotePath = `${kbPrefix.replace(/\/+$/, "")}/${filename}`;
+  await durableWriteGithubFile(remotePath, durableMarkdownForNote(note), `Sync smart note ${note.id}`);
+  note.syncedAt = new Date().toISOString();
+  note.syncPath = `github:${repo}/${remotePath}`;
+  note.updatedAt = new Date().toISOString();
+  store.notes[index] = note;
+  await durableWriteStore(store);
+  sendJson(res, 200, { item: note, syncPath: note.syncPath });
+  return true;
+}
+
 async function handleExpand(req, res) {
   if (!hasSession(req)) {
     sendJson(res, 401, { error: "unauthorized", detail: "需要登录后访问" });
@@ -378,6 +627,7 @@ export default async function handler(req, res) {
     if (await handleImageInsight(req, res)) return;
   }
   if (blockInvalidGitHubToken(req, res, url)) return;
+  if (await handleDurableNotePatch(req, res, url)) return;
   const { handleApi } = await import("../server.js");
   try {
     await handleApi(req, res, url);
