@@ -1,0 +1,8 @@
+data/
+tmp-test-data/
+tmp-test-kb/
+remote-data/
+kb/智慧笔记摘要本/*.md
+node_modules/
+.env
+.DS_Store
