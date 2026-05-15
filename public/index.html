@@ -117,7 +117,12 @@
     <!-- Detail View -->
     <div id="detail-view" class="fixed inset-0 z-50 bg-white hidden overflow-y-auto no-scrollbar">
         <div class="p-8">
-            <div onclick="closeDetail()" class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mb-6 cursor-pointer"><i class="fa-solid fa-arrow-left"></i></div>
+            <div class="flex items-center justify-between mb-6">
+                <div onclick="closeDetail()" class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center cursor-pointer"><i class="fa-solid fa-arrow-left"></i></div>
+                <button id="delete-note-btn" onclick="deleteCurrentNote()" class="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center text-red-400 cursor-pointer active:scale-95 transition-all">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
             <div id="detail-content-area">
                 <span id="detail-type" class="text-[10px] font-black text-blue-500 uppercase tracking-widest block mb-2">SOURCE</span>
                 <h2 id="detail-title" class="text-2xl font-bold text-gray-900 mb-6 leading-tight">内容详情标题</h2>
@@ -140,6 +145,7 @@
             filter: 'all',
             loading: false,
             storage: null,
+            activeNoteId: '',
         };
 
         const submitButton = document.getElementById('submit-btn');
@@ -161,6 +167,7 @@
 
         function closeDetail() {
             document.getElementById('detail-view').classList.add('hidden');
+            state.activeNoteId = '';
         }
 
         function filterCategory(type, event) {
@@ -374,6 +381,7 @@
         }
 
         function openDetail(data) {
+            state.activeNoteId = data.id;
             document.getElementById('detail-type').innerText = data.typeLabel;
             document.getElementById('detail-title').innerText = data.title;
             document.getElementById('detail-summary').innerText = data.summary;
@@ -385,6 +393,20 @@
                 : '<div class="text-gray-300">暂无重点</div>';
             document.getElementById('detail-body').innerHTML = formatLongText(data.content);
             document.getElementById('detail-view').classList.remove('hidden');
+        }
+
+        async function deleteCurrentNote() {
+            if (!state.activeNoteId) return;
+            if (!confirm('删除这条笔记？')) return;
+            try {
+                await api(`/api/notes/${state.activeNoteId}`, { method: 'DELETE' });
+                state.notes = state.notes.filter(note => note.id !== state.activeNoteId);
+                document.querySelector(`[data-id="${state.activeNoteId}"]`)?.remove();
+                closeDetail();
+                renderCards();
+            } catch (error) {
+                alert(error.message || '删除失败');
+            }
         }
 
         async function submitContent() {
