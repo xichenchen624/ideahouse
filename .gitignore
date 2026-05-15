@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+.env
+.vercel/
+data/
+tmp-test-data/
+tmp-test-kb/
+remote-data/
+kb/智慧笔记摘要本/*.md
