@@ -54,7 +54,7 @@ function patchWeChatFetchTimeout() {
   const marker = Symbol.for("smart-note.wechat-fetch-timeout-patched");
   if (globalThis[marker]) return;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (resource, options = {}) => {
+  globalThis.fetch = async (resource, options = {}) => {
     const href = typeof resource === "string" ? resource : resource?.url || String(resource || "");
     if (href.includes("mp.weixin.qq.com")) {
       const headers = {
@@ -62,11 +62,64 @@ function patchWeChatFetchTimeout() {
         "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.47",
         accept: "text/html,application/xhtml+xml,text/plain",
       };
-      return originalFetch(resource, { ...options, headers, signal: undefined });
+      const response = await originalFetch(resource, { ...options, headers, signal: undefined });
+      return withWeChatImageHints(response);
     }
     return originalFetch(resource, options);
   };
   globalThis[marker] = true;
+}
+
+function imageUrlsFromHtml(html) {
+  const urls = [];
+  const seen = new Set();
+  for (const match of String(html || "").matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const src = attr(tag, "data-src") || attr(tag, "data-original") || attr(tag, "data-backsrc") || attr(tag, "src");
+    const url = normalizeImageUrl(src);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= 10) break;
+  }
+  return urls;
+}
+
+function attr(tag, name) {
+  const match = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  return String(match?.[1] || match?.[2] || match?.[3] || "").replace(/&amp;/g, "&");
+}
+
+function normalizeImageUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.startsWith("data:") || raw.startsWith("javascript:")) return "";
+  const url = raw.startsWith("//") ? `https:${raw}` : raw;
+  if (!/^https?:\/\/(?:mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn)\//i.test(url)) return "";
+  return url;
+}
+
+async function withWeChatImageHints(response) {
+  const type = response.headers.get("content-type") || "";
+  if (!response.ok || !type.includes("text/html")) return response;
+  const html = await response.text();
+  const imageUrls = imageUrlsFromHtml(html);
+  if (!imageUrls.length) return makeHtmlResponse(html, response);
+  const openTag = /<[^>]+id=["']js_content["'][^>]*>/i.exec(html);
+  if (!openTag) return makeHtmlResponse(html, response);
+  const insertAt = openTag.index + openTag[0].length;
+  const imageHintHtml = `<p>图片：</p>${imageUrls.map((url) => `<p>${url}</p>`).join("")}`;
+  return makeHtmlResponse(`${html.slice(0, insertAt)}${imageHintHtml}${html.slice(insertAt)}`, response);
+}
+
+function makeHtmlResponse(html, sourceResponse) {
+  const headers = new Headers(sourceResponse.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  return new Response(html, {
+    status: sourceResponse.status,
+    statusText: sourceResponse.statusText,
+    headers,
+  });
 }
 
 export default async function handler(req, res) {
