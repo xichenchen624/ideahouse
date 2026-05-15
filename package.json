@@ -1,0 +1,14 @@
+{
+  "name": "smart-note-summarizer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "智慧笔记摘要本 Web 原型",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/api-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
