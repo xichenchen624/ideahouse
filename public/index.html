@@ -119,9 +119,14 @@
         <div class="p-8">
             <div class="flex items-center justify-between mb-6">
                 <div onclick="closeDetail()" class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center cursor-pointer"><i class="fa-solid fa-arrow-left"></i></div>
-                <button id="delete-note-btn" onclick="deleteCurrentNote()" class="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center text-red-400 cursor-pointer active:scale-95 transition-all">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button id="detail-favorite-btn" onclick="toggleActiveFavorite()" class="h-10 px-4 bg-gray-50 rounded-full flex items-center justify-center gap-2 text-gray-500 text-xs font-black cursor-pointer active:scale-95 transition-all">
+                        <i class="fa-regular fa-star"></i><span>收藏</span>
+                    </button>
+                    <button id="delete-note-btn" onclick="deleteCurrentNote()" class="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center text-red-400 cursor-pointer active:scale-95 transition-all">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
             </div>
             <div id="detail-content-area">
                 <span id="detail-type" class="text-[10px] font-black text-blue-500 uppercase tracking-widest block mb-2">SOURCE</span>
@@ -130,7 +135,13 @@
                     <p id="detail-summary" class="text-sm text-gray-700 leading-relaxed italic"></p>
                 </div>
                 <div id="detail-tags" class="flex flex-wrap gap-2 mb-8"></div>
+                <div id="detail-images" class="grid grid-cols-2 gap-3 mb-8"></div>
                 <div id="detail-points" class="bg-gray-50 rounded-3xl p-5 mb-8 text-sm text-gray-700 leading-loose"></div>
+                <div class="flex items-center gap-3 my-8">
+                    <div class="h-px flex-1 bg-gray-100"></div>
+                    <span class="text-[10px] font-black text-gray-300 tracking-[0.2em]">正文</span>
+                    <div class="h-px flex-1 bg-gray-100"></div>
+                </div>
                 <div id="detail-body" class="text-gray-600 text-sm leading-loose space-y-4">
                     <!-- 详情正文 -->
                 </div>
@@ -251,6 +262,36 @@
                 .split(/\n{2,}/)
                 .filter(Boolean)
                 .map(paragraph => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`)
+                .join('');
+        }
+
+        function imagesFromText(text) {
+            const matches = String(text || '').match(/https?:\/\/(?:mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn|sns-webpic-qc\.xhscdn\.com|ci\.xhscdn\.com|i\.ytimg\.com)\/[^\s，。；,;)）\]]+/ig) || [];
+            const seen = new Set();
+            return matches
+                .map(url => url.replace(/&amp;/g, '&'))
+                .filter(url => !seen.has(url) && seen.add(url))
+                .slice(0, 8)
+                .map(url => ({ url, alt: '文章图片' }));
+        }
+
+        function removeImageHints(text) {
+            return String(text || '')
+                .split(/\n+/)
+                .filter(line => !/^图片[:：]?$/.test(line.trim()))
+                .filter(line => !/^https?:\/\/(?:mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn|sns-webpic-qc\.xhscdn\.com|ci\.xhscdn\.com|i\.ytimg\.com)\//i.test(line.trim()))
+                .join('\n');
+        }
+
+        function formatImages(images) {
+            if (!images?.length) return '';
+            return images
+                .slice(0, 8)
+                .map((image, index) => `
+                    <figure class="${index === 0 ? 'col-span-2' : ''} overflow-hidden rounded-3xl bg-gray-50 border border-gray-100">
+                        <img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.alt || '文章图片')}" loading="lazy" referrerpolicy="no-referrer" class="w-full h-full max-h-80 object-cover">
+                    </figure>
+                `)
                 .join('');
         }
 
@@ -397,7 +438,8 @@
                 summary: note.summary || '暂无摘要',
                 tags: note.tags || [],
                 keyPoints: note.keyPoints || [],
-                content: note.sourceText || note.body || '',
+                content: removeImageHints(note.sourceText || note.body || ''),
+                images: note.images?.length ? note.images : imagesFromText(note.sourceText || note.body || ''),
                 favorite: Boolean(note.favorite),
                 raw: note,
             };
@@ -491,26 +533,48 @@
             card.innerHTML = `
                 <div class="flex justify-between items-start mb-3">
                     <span class="text-[9px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider ${data.typeColor}">${escapeHtml(data.typeLabel)}</span>
-                    <i class="${data.favorite ? 'fa-solid text-yellow-400' : 'fa-regular text-gray-200'} fa-star"></i>
+                    <div class="flex items-center gap-2">
+                        <button class="favorite-card-btn w-9 h-9 rounded-full bg-gray-50 flex items-center justify-center ${data.favorite ? 'text-yellow-400' : 'text-gray-300'}" aria-label="收藏">
+                            <i class="${data.favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+                        </button>
+                        <button class="delete-card-btn w-9 h-9 rounded-full bg-red-50 flex items-center justify-center text-red-300" aria-label="删除">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
                 </div>
                 <h3 class="font-bold text-gray-800 mb-2 leading-snug">${escapeHtml(data.title)}</h3>
                 <p class="text-xs text-gray-400 line-clamp-2">${escapeHtml(data.summary)}</p>
             `;
 
+            card.querySelector('.favorite-card-btn').onclick = event => toggleFavorite(data.id, event);
+            card.querySelector('.delete-card-btn').onclick = event => deleteNote(data.id, event);
             card.onclick = () => openDetail(data);
             container.prepend(card);
             if (state.filter !== 'all' && data.type !== state.filter) card.style.display = 'none';
             updateEmptyState();
         }
 
+        function setDetailFavoriteButton(data) {
+            const button = document.getElementById('detail-favorite-btn');
+            button.className = data.favorite
+                ? 'h-10 px-4 bg-yellow-50 rounded-full flex items-center justify-center gap-2 text-yellow-500 text-xs font-black cursor-pointer active:scale-95 transition-all'
+                : 'h-10 px-4 bg-gray-50 rounded-full flex items-center justify-center gap-2 text-gray-500 text-xs font-black cursor-pointer active:scale-95 transition-all';
+            button.innerHTML = data.favorite
+                ? '<i class="fa-solid fa-star"></i><span>已收藏</span>'
+                : '<i class="fa-regular fa-star"></i><span>收藏</span>';
+        }
+
         function openDetail(data) {
             state.activeNoteId = data.id;
+            setDetailFavoriteButton(data);
             document.getElementById('detail-type').innerText = data.typeLabel;
             document.getElementById('detail-title').innerText = data.title;
             document.getElementById('detail-summary').innerText = data.summary;
             document.getElementById('detail-tags').innerHTML = data.tags.length
                 ? data.tags.map(tag => `<span class="text-[11px] font-bold px-3 py-1.5 rounded-full bg-blue-50 text-blue-500">#${escapeHtml(tag)}</span>`).join('')
                 : '<span class="text-xs text-gray-300">暂无标签</span>';
+            document.getElementById('detail-images').innerHTML = formatImages(data.images);
+            document.getElementById('detail-images').classList.toggle('hidden', !data.images?.length);
             document.getElementById('detail-points').innerHTML = data.keyPoints.length
                 ? `<div class="font-black text-gray-900 mb-2">重点</div><ul class="list-disc pl-5 space-y-2">${data.keyPoints.map(point => `<li>${escapeHtml(point)}</li>`).join('')}</ul>`
                 : '<div class="text-gray-300">暂无重点</div>';
@@ -518,18 +582,49 @@
             document.getElementById('detail-view').classList.remove('hidden');
         }
 
-        async function deleteCurrentNote() {
+        function replaceNote(updatedNote) {
+            state.notes = state.notes.map(note => note.id === updatedNote.id ? updatedNote : note);
+            renderCards();
+            if (state.activeNoteId === updatedNote.id) openDetail(viewModel(updatedNote));
+        }
+
+        async function toggleFavorite(id, event) {
+            event?.stopPropagation();
+            const current = state.notes.find(note => note.id === id);
+            if (!current) return;
+            try {
+                const payload = await api(`/api/notes/${id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ favorite: !current.favorite }),
+                });
+                replaceNote(payload.item);
+            } catch (error) {
+                alert(error.message || '收藏状态更新失败');
+            }
+        }
+
+        async function toggleActiveFavorite() {
             if (!state.activeNoteId) return;
+            await toggleFavorite(state.activeNoteId);
+        }
+
+        async function deleteNote(id, event) {
+            event?.stopPropagation();
+            if (!id) return;
             if (!confirm('删除这条笔记？')) return;
             try {
-                await api(`/api/notes/${state.activeNoteId}`, { method: 'DELETE' });
-                state.notes = state.notes.filter(note => note.id !== state.activeNoteId);
-                document.querySelector(`[data-id="${state.activeNoteId}"]`)?.remove();
-                closeDetail();
+                await api(`/api/notes/${id}`, { method: 'DELETE' });
+                state.notes = state.notes.filter(note => note.id !== id);
+                document.querySelector(`[data-id="${id}"]`)?.remove();
+                if (state.activeNoteId === id) closeDetail();
                 renderCards();
             } catch (error) {
                 alert(error.message || '删除失败');
             }
+        }
+
+        async function deleteCurrentNote() {
+            await deleteNote(state.activeNoteId);
         }
 
         async function submitContent() {
@@ -547,7 +642,7 @@
             try {
                 const payload = await api('/api/content', {
                     method: 'POST',
-                    body: JSON.stringify({ url, manualText, favorite: true }),
+                    body: JSON.stringify({ url, manualText, favorite: false }),
                 });
                 const note = payload.item;
                 if (!manualText && isRestrictedSource(url) && note.parseStatus === 'fallback') {
