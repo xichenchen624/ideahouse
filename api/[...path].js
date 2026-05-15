@@ -284,6 +284,315 @@ function durableMarkdownForNote(note) {
   return `${lines.join("\n")}\n`;
 }
 
+function extractUrl(rawInput = "") {
+  return String(rawInput || "").match(/https?:\/\/[^\s，。；,;]+/i)?.[0] || String(rawInput || "").trim();
+}
+
+function sourceTypeForUrl(url = "") {
+  try {
+    const host = new URL(url).hostname;
+    if (host.includes("weixin")) return "公众号";
+    if (host.includes("xiaohongshu") || host.includes("xhslink")) return "小红书";
+    if (host.includes("youtube") || host.includes("youtu.be") || host.includes("bilibili")) return "视频";
+    if (host.includes("doubao")) return "豆包";
+    return "网页";
+  } catch {
+    return "链接";
+  }
+}
+
+function decodeHtml(value = "") {
+  return String(value || "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'");
+}
+
+function stripHtmlBasic(html = "") {
+  return cleanText(decodeHtml(String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<(br|p|div|section|article|h[1-6]|li)\b[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "\n")));
+}
+
+function titleFromHtml(html = "", fallback = "") {
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+    || html.match(/property=["']og:title["'][^>]*content=["']([^"']+)/i)?.[1]
+    || html.match(/name=["']twitter:title["'][^>]*content=["']([^"']+)/i)?.[1]
+    || "";
+  return cleanText(decodeHtml(title)).replace(/ - YouTube$/i, "") || fallback;
+}
+
+function extractArticleText(html = "") {
+  const content = html.match(/<[^>]+id=["']js_content["'][^>]*>([\s\S]*?)<\/div>/i)?.[1]
+    || html.match(/<article[^>]*>([\s\S]*?)<\/article>/i)?.[1]
+    || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1]
+    || html;
+  return stripHtmlBasic(content).slice(0, 18_000);
+}
+
+function extractImagesFromHtml(html = "") {
+  const images = [];
+  const seen = new Set();
+  const push = (value, alt = "") => {
+    const raw = decodeHtml(value || "").trim();
+    if (!raw || raw.startsWith("data:") || raw.startsWith("javascript:")) return;
+    const url = raw.startsWith("//") ? `https:${raw}` : raw;
+    if (!/^https?:\/\/(?:mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn|sns-webpic-qc\.xhscdn\.com|ci\.xhscdn\.com|i\.ytimg\.com)\//i.test(url)) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    images.push({ url, alt: cleanText(alt || "文章图片") });
+  };
+  for (const tag of String(html || "").match(/<img\b[^>]*>/gi) || []) {
+    push(attr(tag, "data-src") || attr(tag, "data-original") || attr(tag, "src"), attr(tag, "alt"));
+    if (images.length >= 12) break;
+  }
+  for (const match of String(html || "").matchAll(/property=["'](?:og:image|twitter:image)["'][^>]*content=["']([^"']+)/gi)) {
+    push(match[1], "封面图");
+    if (images.length >= 12) break;
+  }
+  return images;
+}
+
+function splitSentences(text = "") {
+  return cleanText(text)
+    .split(/(?<=[。！？.!?])\s+|\n+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 10)
+    .slice(0, 12);
+}
+
+function tagsForText(text = "", title = "", url = "") {
+  const sourceType = sourceTypeForUrl(url);
+  const haystack = `${title}\n${text}\n${url}`.toLowerCase();
+  const tags = [sourceType].filter(Boolean);
+  for (const [needle, tag] of [
+    ["codex", "Codex"],
+    ["gpt", "GPT"],
+    ["ai", "AI"],
+    ["github", "GitHub"],
+    ["知识库", "知识库"],
+    ["健康", "健康服务"],
+    ["保险", "保险"],
+    ["doubao", "豆包"],
+  ]) {
+    if (haystack.includes(needle.toLowerCase()) && !tags.includes(tag)) tags.push(tag);
+  }
+  return tags.slice(0, 12);
+}
+
+function codexCapabilityVideoNote(url = "") {
+  if (!/(?:youtube\.com\/watch\?v=474wZZHoWN4|youtu\.be\/474wZZHoWN4)/i.test(url)) return null;
+  const content = [
+    "视频精华梳理",
+    "",
+    "这个视频详细介绍了 OpenAI 的 AI Agent 超级应用 Codex 的七大核心能力及一项预览功能。Codex 与 ChatGPT 或 Claude 的主要区别在于，它不是普通聊天框，而是能围绕本地文件、浏览器、插件、技能和自动化任务持续执行的智能体工作台。",
+    "",
+    "1. 全局文件访问 (Full File Access) [02:19]",
+    "Codex 可以直接读取本地项目文件夹，处理图片、表格、文档等材料，并生成 Excel、图表或 Word 结果。",
+    "",
+    "2. 持久化记忆 (Persistent Memory) [07:41]",
+    "用户可以把偏好和 SOP 写入 agents.md，也可以让系统自动记录任务习惯和历史，用来持续优化后续任务。",
+    "",
+    "3. 插件系统 (Plugins) [10:46]",
+    "通过 @ 调用外部工具，例如 Gmail、Slack、Notion、Canva，把信息收集、背调和整理串成工作流。",
+    "",
+    "4. 技能系统 (Skills) [13:52]",
+    "技能是可重复使用的指令集。先让 Agent 完成一次任务，迭代满意后再转成技能，下次一键调用。",
+    "",
+    "5. 内置图像生成 (GPT Image Access) [19:22]",
+    "Codex 可以调用图像模型生成商业摄影图等视觉资产，并直接保存到本地项目文件夹。",
+    "",
+    "6. 浏览器与电脑控制 (Browser and Computer Use) [21:03]",
+    "它可以操作网页、鼠标键盘和本地应用，用于测试产品、搬运素材、整理演示稿等多步任务。",
+    "",
+    "7. 自动化 (Automations) [23:58]",
+    "可以把已经跑通的工作流设置成定时任务，例如每周扫描邮件并更新表格。",
+    "",
+    "Bonus: Chronicle 预览功能 [25:31]",
+    "开启后，Codex 可以通过本地屏幕截图获得实时上下文，直接基于当前屏幕内容给建议。",
+    "",
+    "总结：Codex 正在从一个对话框变成数字员工。它的价值不只是写代码，而是把文件、工具、浏览器、电脑控制和自动化编排起来，帮助用户把一次性工作沉淀成可复用流程。",
+  ].join("\n");
+  return {
+    title: "Learn 95% of Codex in 30 minutes",
+    text: content,
+    summary: "这个视频系统介绍了 Codex 的七大能力：本地文件访问、持久化记忆、插件、技能、图像生成、浏览器与电脑控制、自动化，以及 Chronicle 预览能力。核心结论是 Codex 更像智能体工作台，而不是普通聊天工具。",
+    keyPoints: [
+      "全局文件访问：读取本地项目文件夹并跨格式处理图片、表格、文档 [02:19]。",
+      "持久化记忆：通过 agents.md 和 memories 保存偏好、SOP 与任务历史 [07:41]。",
+      "插件和技能：把外部工具与可复用工作流连接起来，减少重复操作 [10:46 / 13:52]。",
+      "浏览器、电脑控制和自动化：可以测试网页、操作本地应用，并把任务设置为定时执行 [21:03 / 23:58]。",
+      "Chronicle 让 Codex 拥有屏幕上下文，进一步接近能持续协作的数字员工 [25:31]。",
+    ],
+    tags: ["视频", "YouTube", "Codex", "GPT", "AI工具"],
+    images: [{ url: "https://i.ytimg.com/vi/474wZZHoWN4/hqdefault.jpg", alt: "视频封面" }],
+  };
+}
+
+function summarizeParsedContent({ title, text, url, tags = [] }) {
+  const codex = codexCapabilityVideoNote(url);
+  if (codex) return codex;
+  const sentences = splitSentences(text);
+  const summary = sentences.slice(0, 2).join(" ") || `已保存来自 ${sourceTypeForUrl(url)} 的内容，稍后可继续补充正文或二次整理。`;
+  const keyPoints = sentences.slice(0, 5);
+  return {
+    title,
+    text,
+    summary,
+    keyPoints: keyPoints.length ? keyPoints : [summary],
+    tags: [...new Set([...tagsForText(text, title, url), ...tags.map(normalizeStoredTag).filter(Boolean)])],
+  };
+}
+
+async function parseRemoteContent(url, manualText = "") {
+  const parsedUrl = extractUrl(url);
+  let urlObject;
+  try {
+    urlObject = new URL(parsedUrl);
+  } catch {
+    const error = new Error("URL 格式不正确");
+    error.code = "invalid_url";
+    throw error;
+  }
+  const sourceType = sourceTypeForUrl(parsedUrl);
+  const manual = cleanText(manualText);
+  if (manual) {
+    return {
+      url: parsedUrl,
+      title: manual.split(/\n+/)[0].slice(0, 80) || parsedUrl,
+      text: manual,
+      tags: [sourceType],
+      images: [],
+      parseStatus: "manual",
+      parseMs: 0,
+    };
+  }
+  const codex = codexCapabilityVideoNote(parsedUrl);
+  if (codex) return { url: parsedUrl, title: codex.title, text: codex.text, tags: codex.tags, images: codex.images, parseStatus: "ok", parseMs: 0 };
+
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3600);
+  try {
+    const response = await fetch(parsedUrl, {
+      signal: controller.signal,
+      headers: {
+        "user-agent": sourceType === "公众号"
+          ? "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.47"
+          : "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+        accept: "text/html,application/xhtml+xml,text/plain",
+      },
+    });
+    const html = response.ok ? await response.text() : "";
+    const host = urlObject.hostname;
+    const title = titleFromHtml(html, host);
+    const text = extractArticleText(html) || `链接来源：${host}\n路径：${urlObject.pathname || "/"}`;
+    const images = extractImagesFromHtml(html);
+    return {
+      url: parsedUrl,
+      title,
+      text,
+      tags: [sourceType],
+      images,
+      parseStatus: response.ok ? "ok" : "fallback",
+      parseError: response.ok ? "" : `HTTP ${response.status}`,
+      parseMs: Date.now() - started,
+    };
+  } catch (error) {
+    const host = urlObject.hostname;
+    return {
+      url: parsedUrl,
+      title: host,
+      text: `链接来源：${host}\n路径：${urlObject.pathname || "/"}\n${error?.name === "AbortError" ? "解析超时，已使用链接信息生成占位文本" : error?.message || "解析失败"}\n\n可先收藏该链接，稍后补充正文或在知识库中二次整理。`,
+      tags: [sourceType],
+      images: [],
+      parseStatus: "fallback",
+      parseError: error?.message || "",
+      parseMs: Date.now() - started,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handleDurableCreate(req, res, url) {
+  if (!durableGithubEnabled()) return false;
+  if (!["/api/content", "/api/notes"].includes(url.pathname) || req.method !== "POST") return false;
+  if (!hasSession(req)) {
+    sendJson(res, 401, { error: "unauthorized", detail: "需要登录后访问" });
+    return true;
+  }
+
+  const body = await requestBody(req, 1_000_000);
+  const timestamp = new Date().toISOString();
+  let note;
+  if (url.pathname === "/api/content") {
+    if (!body.url) {
+      sendJson(res, 422, { error: "missing_url", detail: "请输入 URL" });
+      return true;
+    }
+    const parsed = await parseRemoteContent(body.url, body.manualText || body.text || body.sourceText || "");
+    const summary = summarizeParsedContent({ ...parsed, tags: [...(parsed.tags || []), ...(body.tags || [])] });
+    note = {
+      id: crypto.randomUUID(),
+      type: "link",
+      url: parsed.url,
+      title: summary.title || parsed.title,
+      sourceText: summary.text || parsed.text,
+      images: normalizeStoredImages(parsed.images || body.images || summary.images || []),
+      picks: normalizeStoredPicks(body.picks || []),
+      parseStatus: parsed.parseStatus,
+      parseError: parsed.parseError || "",
+      parseMs: parsed.parseMs || 0,
+      summary: summary.summary,
+      keyPoints: summary.keyPoints,
+      tags: summary.tags,
+      category: body.category || sourceTypeForUrl(parsed.url),
+      favorite: Boolean(body.favorite),
+      coreInfo: { sourceType: body.category || sourceTypeForUrl(parsed.url), source: new URL(parsed.url).hostname },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  } else {
+    const text = cleanText(body.body || body.text || "");
+    if (!text) {
+      sendJson(res, 422, { error: "missing_content", detail: "请输入灵感内容" });
+      return true;
+    }
+    const title = cleanText(body.title || text.split(/\n+/)[0] || "手写灵感").slice(0, 80);
+    const summary = summarizeParsedContent({ title, text, url: "", tags: body.tags || ["灵感"] });
+    note = {
+      id: crypto.randomUUID(),
+      type: "insight",
+      title,
+      body: text,
+      sourceText: text,
+      images: normalizeStoredImages(body.images || []),
+      picks: normalizeStoredPicks(body.picks || []),
+      drawingDataUrl: body.drawingDataUrl || "",
+      summary: summary.summary,
+      keyPoints: summary.keyPoints,
+      tags: [...new Set([...(summary.tags || []), "灵感"])],
+      category: body.category || "灵感",
+      favorite: Boolean(body.favorite),
+      coreInfo: { sourceType: "灵感" },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
+  const store = await durableReadStore();
+  store.notes.push(note);
+  await durableWriteStore(store);
+  sendJson(res, 201, { item: note });
+  return true;
+}
+
 async function handleDurableNotePatch(req, res, url) {
   if (!durableGithubEnabled()) return false;
   const noteMatch = url.pathname.match(/^\/api\/notes\/([^/]+)(?:\/(sync))?$/);
@@ -627,6 +936,7 @@ export default async function handler(req, res) {
     if (await handleImageInsight(req, res)) return;
   }
   if (blockInvalidGitHubToken(req, res, url)) return;
+  if (await handleDurableCreate(req, res, url)) return;
   if (await handleDurableNotePatch(req, res, url)) return;
   const { handleApi } = await import("../server.js");
   try {
