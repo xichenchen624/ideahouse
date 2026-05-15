@@ -470,7 +470,7 @@ const INSIGHT_PATCH = String.raw`
             const body = JSON.parse(nextOptions.body);
             if (isDoubaoUrl(body.url)) {
               body.category = body.category || "豆包";
-              body.tags = [...new Set([...(Array.isArray(body.tags) ? body.tags : []), "豆包"])]
+              body.tags = [...new Set([...(Array.isArray(body.tags) ? body.tags : []), "豆包"])] ;
               nextOptions.body = JSON.stringify(body);
             }
           } catch {}
