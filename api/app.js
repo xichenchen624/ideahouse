@@ -206,7 +206,7 @@ const INSIGHT_PATCH = String.raw`
         body: JSON.stringify({ imageDataUrl: imageDataUrl, filename: file.name, mode: "insight" })
       });
       const extracted = payload && payload.extractedText || "";
-      if (ui.manualInput) ui.manualInput.value = ui.manualInput.value.trim() ? ui.manualInput.value.trim() + "\\n\\n" + extracted : extracted;
+      if (ui.manualInput) ui.manualInput.value = ui.manualInput.value.trim() ? ui.manualInput.value.trim() + "\n\n" + extracted : extracted;
       const previewStatus = ui.imagePreview && ui.imagePreview.querySelector("[data-image-preview-status]");
       if (previewStatus) previewStatus.textContent = "已用 " + (payload.model || "AI") + " 解析，可继续编辑";
       if (typeof window.setStatus === "function") window.setStatus("图片内容已写入灵感正文，可以继续修改后保存");
@@ -373,12 +373,11 @@ const INSIGHT_PATCH = String.raw`
     if (!blocks.length) return '<p class="text-gray-300">暂无详细内容</p>';
     return blocks.map(function (block, index) {
       const safe = htmlEscape(block.text);
-      const pick = htmlEscape(block.text);
       if (block.type === "heading") {
         return '<section class="pt-2"><h3 class="text-base font-black text-gray-900 leading-snug">' + safe + '</h3></section>';
       }
       const bullet = block.type === "bullet" ? '<span class="mt-3 w-1.5 h-1.5 rounded-full bg-blue-300 shrink-0"></span>' : '';
-      return '<div class="pickable-block rounded-2xl px-3 py-3 -mx-3 hover:bg-blue-50/60 transition-colors" data-index="' + index + '"><div class="flex items-start gap-3">' + bullet + '<p class="flex-1 leading-8 text-gray-600">' + safe + '</p><button data-pick="' + pick + '" class="smart-pick-btn shrink-0 mt-1 px-2.5 py-1 rounded-full bg-yellow-50 text-yellow-600 text-[10px] font-black">Pick</button></div></div>';
+      return '<div class="pickable-block rounded-2xl px-3 py-3 -mx-3 hover:bg-blue-50/60 transition-colors" data-index="' + index + '"><div class="flex items-start gap-3">' + bullet + '<p class="flex-1 leading-8 text-gray-600">' + safe + '</p></div></div>';
     }).join("");
   }
 
@@ -420,7 +419,7 @@ const INSIGHT_PATCH = String.raw`
     const note = (typeof state !== "undefined" && state.notes || []).find(function (item) { return item.id === id; }) || {};
     const picks = [...new Set([...(Array.isArray(note.picks) ? note.picks : []), ...readLocalPicks(id)].map(normalizePickText).filter(Boolean))];
     if (!picks.length) {
-      box.innerHTML = '<div class="font-black text-gray-900 mb-2">我的 pick</div><p class="text-yellow-700/60">在正文里选中文字，或点段落右侧的 Pick，就会汇总到这里。</p>';
+      box.innerHTML = '<div class="font-black text-gray-900 mb-2">我的 pick</div><p class="text-yellow-700/60">在正文里选中文字后，点底部“加入我的 pick”，就会汇总到这里。</p>';
       return;
     }
     box.innerHTML = '<div class="font-black text-gray-900 mb-3">我的 pick</div><div class="space-y-3">' + picks.map(function (pick, index) {
@@ -471,7 +470,7 @@ const INSIGHT_PATCH = String.raw`
             const body = JSON.parse(nextOptions.body);
             if (isDoubaoUrl(body.url)) {
               body.category = body.category || "豆包";
-              body.tags = [...new Set([...(Array.isArray(body.tags) ? body.tags : []), "豆包"])];
+              body.tags = [...new Set([...(Array.isArray(body.tags) ? body.tags : []), "豆包"])]
               nextOptions.body = JSON.stringify(body);
             }
           } catch {}
@@ -518,13 +517,6 @@ const INSIGHT_PATCH = String.raw`
       };
     }
     document.addEventListener("click", function (event) {
-      const pickButton = event.target.closest(".smart-pick-btn");
-      if (pickButton) {
-        event.stopPropagation();
-        const id = typeof state !== "undefined" ? state.activeNoteId : "";
-        const text = normalizePickText(pickButton.dataset.pick || "");
-        if (id && text) persistPicks(id, [...new Set([...readLocalPicks(id), text])]);
-      }
       const removeButton = event.target.closest(".smart-remove-pick");
       if (removeButton) {
         event.stopPropagation();
