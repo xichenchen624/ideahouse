@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 function trimConfigEnv() {
-  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_DATA_PATH", "GITHUB_KB_PREFIX", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"]) {
+  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_DATA_PATH", "GITHUB_KB_PREFIX", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_VISION_MODEL", "OPENAI_BASE_URL"]) {
     if (process.env[key]) process.env[key] = String(process.env[key]).trim();
   }
 }
@@ -54,12 +54,12 @@ function hasSession(req) {
   return verifySessionToken(token);
 }
 
-function requestBody(req) {
+function requestBody(req, maxBytes = 200_000) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 200_000) {
+      if (body.length > maxBytes) {
         reject(new Error("payload_too_large"));
         req.destroy();
       }
@@ -140,6 +140,101 @@ async function handleExpand(req, res) {
     return true;
   } catch (error) {
     sendJson(res, 502, { error: "ai_expand_failed", detail: error?.name === "AbortError" ? "AI 扩写超时，请稍后重试。" : error?.message || "AI 扩写失败，请稍后再试" });
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeImageDataUrl(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    const error = new Error("请上传 PNG、JPG 或 WebP 图片。");
+    error.code = "invalid_image";
+    throw error;
+  }
+  const mime = match[1].toLowerCase().replace("image/jpg", "image/jpeg");
+  const base64 = match[2].replace(/\s/g, "");
+  const bytes = Buffer.byteLength(base64, "base64");
+  if (!bytes || bytes > 4_000_000) {
+    const error = new Error("图片过大，请选择 4MB 以内的图片。");
+    error.code = "image_too_large";
+    throw error;
+  }
+  return `data:${mime};base64,${base64}`;
+}
+
+async function handleImageInsight(req, res) {
+  if (!hasSession(req)) {
+    sendJson(res, 401, { error: "unauthorized", detail: "需要登录后访问" });
+    return true;
+  }
+  let body;
+  try {
+    body = await requestBody(req, 8_000_000);
+  } catch (error) {
+    sendJson(res, 413, { error: "payload_too_large", detail: "图片过大，请选择 4MB 以内的图片。" });
+    return true;
+  }
+  let imageDataUrl;
+  try {
+    imageDataUrl = normalizeImageDataUrl(body.imageDataUrl || body.image || "");
+  } catch (error) {
+    sendJson(res, 422, { error: error.code || "invalid_image", detail: error.message });
+    return true;
+  }
+
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  const baseModel = String(process.env.OPENAI_MODEL || "gpt-5.5").trim() || "gpt-5.5";
+  const model = String(process.env.OPENAI_VISION_MODEL || baseModel).trim() || baseModel;
+  const baseUrl = String(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  if (!apiKey) {
+    sendJson(res, 503, { error: "ai_not_configured", detail: "图片解析还没配置：请在 Vercel 环境变量里添加 OPENAI_API_KEY。" });
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 22_000);
+  try {
+    const prompt = [
+      "你是一个中文知识整理助手。请读取用户上传的图片，把图片中有价值的信息整理成可保存到灵感笔记的文字。",
+      "要求：如果图片里有文字，先尽量完整转写；看不清的地方用「可能是」标注，不要编造。",
+      "输出结构固定为：图片识别、关键内容、我的灵感草稿、可继续追问。段落之间留空行，直接输出正文。",
+    ].join("\n");
+    const response = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_text", text: prompt },
+            { type: "input_image", image_url: imageDataUrl },
+          ],
+        }],
+        max_output_tokens: 1400,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      sendJson(res, 502, { error: "image_parse_failed", detail: payload?.error?.message || `OpenAI 请求失败：${response.status}` });
+      return true;
+    }
+    const extractedText = cleanText(outputText(payload));
+    if (!extractedText) {
+      sendJson(res, 502, { error: "ai_empty_output", detail: "模型没有从图片中返回可用内容，请换一张更清晰的图片。" });
+      return true;
+    }
+    sendJson(res, 200, { extractedText, model });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, { error: "image_parse_failed", detail: error?.name === "AbortError" ? "图片解析超时，请稍后重试。" : error?.message || "图片解析失败，请稍后再试" });
     return true;
   } finally {
     clearTimeout(timer);
@@ -278,6 +373,9 @@ export default async function handler(req, res) {
   const url = new URL(req.url || "/", `https://${req.headers.host || "localhost"}`);
   if (req.method === "POST" && url.pathname === "/api/expand") {
     if (await handleExpand(req, res)) return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/image-insight") {
+    if (await handleImageInsight(req, res)) return;
   }
   if (blockInvalidGitHubToken(req, res, url)) return;
   const { handleApi } = await import("../server.js");
