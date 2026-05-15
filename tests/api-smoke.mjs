@@ -97,6 +97,14 @@ const link = await request("/api/content", {
   }),
 });
 if (link.item.parseStatus !== "manual" || !link.item.summary) throw new Error("manual link creation failed");
+if (link.item.favorite) throw new Error("link should not be favorite by default");
+
+const favorited = await request(`/api/notes/${link.item.id}`, {
+  method: "PATCH",
+  headers: auth,
+  body: JSON.stringify({ favorite: true }),
+});
+if (!favorited.item.favorite) throw new Error("favorite toggle failed");
 
 const synced = await request(`/api/notes/${created.item.id}/sync`, {
   method: "POST",
