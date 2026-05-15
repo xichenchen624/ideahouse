@@ -1,0 +1,208 @@
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智慧笔记摘要本</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
+    .glass-morphism { background: rgba(255, 255, 255, 0.86); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(226, 232, 240, 0.8); }
+    .note-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid #e2e8f0; }
+    .note-card:active { transform: scale(0.98); background-color: #f1f5f9; }
+    .active-nav { color: #4A90E2 !important; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body class="max-w-md mx-auto bg-white min-h-screen relative pb-28">
+  <header class="sticky top-0 z-30 px-6 py-5 glass-morphism flex justify-between items-center">
+    <div>
+      <h1 class="text-xl font-extrabold text-gray-900 tracking-tight">智慧笔记</h1>
+      <div class="flex items-center space-x-1">
+        <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+        <span class="text-[10px] text-blue-500 font-bold uppercase tracking-widest">AI Engine Active</span>
+      </div>
+    </div>
+    <button onclick="loadNotes()" class="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400"><i class="fa-solid fa-rotate"></i></button>
+  </header>
+
+  <main id="main-content" class="px-6 py-4">
+    <div class="flex space-x-2 mb-6 overflow-x-auto no-scrollbar py-1">
+      <button data-tab="all" onclick="filterCategory('all', event)" class="tab-btn px-5 py-2 bg-blue-600 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-100">全部</button>
+      <button data-tab="official" onclick="filterCategory('official', event)" class="tab-btn px-5 py-2 bg-gray-100 text-gray-500 rounded-2xl text-xs font-bold">公众号</button>
+      <button data-tab="xhs" onclick="filterCategory('xhs', event)" class="tab-btn px-5 py-2 bg-gray-100 text-gray-500 rounded-2xl text-xs font-bold">小红书</button>
+      <button data-tab="video" onclick="filterCategory('video', event)" class="tab-btn px-5 py-2 bg-gray-100 text-gray-500 rounded-2xl text-xs font-bold">视频</button>
+    </div>
+    <div id="cards-container" class="space-y-4">
+      <div id="empty-state" class="text-center py-20">
+        <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i class="fa-solid fa-cloud-arrow-up text-gray-200 text-3xl"></i>
+        </div>
+        <p class="text-gray-400 text-sm font-medium">还没有笔记<br>粘贴链接开始智能提取</p>
+      </div>
+    </div>
+  </main>
+
+  <nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md h-24 bg-white/90 backdrop-blur-md border-t flex items-center justify-around px-10 pb-6 z-40">
+    <div class="flex flex-col items-center active-nav"><i class="fa-solid fa-house-chimney text-xl mb-1"></i><span class="text-[10px] font-bold">首页</span></div>
+    <button onclick="openAddModal()" class="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-blue-200 -mt-12 border-4 border-white active:scale-90 transition-all"><i class="fa-solid fa-plus text-2xl"></i></button>
+    <div class="flex flex-col items-center text-gray-300"><i class="fa-solid fa-wand-sparkles text-xl mb-1"></i><span class="text-[10px] font-bold">灵感</span></div>
+  </nav>
+
+  <div id="add-modal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeAddModal()"></div>
+    <div class="absolute bottom-0 w-full bg-white rounded-t-[2.5rem] p-8 animate-slide-up max-w-md">
+      <div class="w-12 h-1.5 bg-gray-100 rounded-full mx-auto mb-8"></div>
+      <h2 class="text-xl font-bold mb-2 text-center">添加新内容</h2>
+      <p class="text-gray-400 text-xs text-center mb-6">支持公众号、小红书或视频链接</p>
+      <div class="bg-gray-50 rounded-3xl p-5 mb-6 border-2 border-transparent focus-within:border-blue-400 transition-all">
+        <textarea id="url-input" class="w-full bg-transparent border-none focus:ring-0 text-sm h-24 placeholder-gray-300 resize-none" placeholder="粘贴链接或分享口令..."></textarea>
+      </div>
+      <p id="status-message" class="hidden text-center text-xs font-bold text-blue-500 mb-4"></p>
+      <button id="submit-btn" class="w-full bg-blue-500 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all flex items-center justify-center space-x-2">
+        <i class="fa-solid fa-bolt-lightning"></i><span>开始智能提取</span>
+      </button>
+      <button onclick="closeAddModal()" class="w-full text-gray-400 mt-4 text-sm font-bold">取消</button>
+    </div>
+  </div>
+
+  <div id="detail-view" class="fixed inset-0 z-50 bg-white hidden overflow-y-auto no-scrollbar">
+    <div class="p-8">
+      <button onclick="closeDetail()" class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mb-6"><i class="fa-solid fa-arrow-left"></i></button>
+      <span id="detail-type" class="text-[10px] font-black text-blue-500 uppercase tracking-widest block mb-2">SOURCE</span>
+      <h2 id="detail-title" class="text-2xl font-bold text-gray-900 mb-6 leading-tight">内容详情标题</h2>
+      <div class="bg-blue-50 rounded-3xl p-6 mb-8 border border-blue-100"><p id="detail-summary" class="text-sm text-gray-700 leading-relaxed italic"></p></div>
+      <div id="detail-tags" class="flex flex-wrap gap-2 mb-8"></div>
+      <div id="detail-points" class="bg-gray-50 rounded-3xl p-5 mb-8 text-sm text-gray-700 leading-loose"></div>
+      <div id="detail-body" class="text-gray-600 text-sm leading-loose space-y-4"></div>
+    </div>
+  </div>
+
+  <script>
+    const state = { token: localStorage.getItem('smart-note-token') || '', notes: [], filter: 'all' };
+    const submitButton = document.getElementById('submit-btn');
+    const statusMessage = document.getElementById('status-message');
+
+    function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); setTimeout(() => document.getElementById('url-input').focus(), 80); }
+    function closeAddModal() { document.getElementById('add-modal').classList.add('hidden'); document.getElementById('url-input').value = ''; setStatus(''); setSubmitBusy(false); }
+    function closeDetail() { document.getElementById('detail-view').classList.add('hidden'); }
+
+    function filterCategory(type, event) {
+      state.filter = type;
+      document.querySelectorAll('.note-item').forEach(card => { card.style.display = type === 'all' || card.dataset.type === type ? 'block' : 'none'; });
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.className = 'tab-btn px-5 py-2 bg-gray-100 text-gray-500 rounded-2xl text-xs font-bold'; });
+      const currentButton = event?.currentTarget || document.querySelector(`[data-tab="${type}"]`);
+      if (currentButton) currentButton.className = 'tab-btn px-5 py-2 bg-blue-600 text-white rounded-2xl text-xs font-bold shadow-md shadow-blue-100';
+      updateEmptyState();
+    }
+
+    function setStatus(message, isError = false) {
+      statusMessage.textContent = message;
+      statusMessage.className = message ? `text-center text-xs font-bold mb-4 ${isError ? 'text-red-500' : 'text-blue-500'}` : 'hidden text-center text-xs font-bold text-blue-500 mb-4';
+    }
+    function setSubmitBusy(isBusy) {
+      submitButton.disabled = isBusy;
+      submitButton.innerHTML = isBusy ? '<i class="fa-solid fa-circle-notch animate-spin"></i> <span>解析中...</span>' : '<i class="fa-solid fa-bolt-lightning"></i><span>开始智能提取</span>';
+      submitButton.classList.toggle('opacity-70', isBusy);
+    }
+    function normalizeUrlInput(value) {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) return '';
+      const embedded = trimmed.match(/https?:\/\/[^\s，。；,;]+/i)?.[0];
+      if (embedded) return embedded;
+      if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i.test(trimmed)) return `https://${trimmed}`;
+      return '';
+    }
+    function escapeHtml(value) { return String(value || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+    function formatLongText(text) { return escapeHtml(text || '暂无详细内容').split(/\n{2,}/).filter(Boolean).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join(''); }
+    function noteType(note) {
+      const category = note.category || note.coreInfo?.sourceType || note.type || '';
+      const url = note.url || '';
+      if (category.includes('公众号') || url.includes('mp.weixin.qq.com')) return { key: 'official', label: '公众号', color: 'bg-green-50 text-green-600' };
+      if (category.includes('小红书') || url.includes('xhslink') || url.includes('xiaohongshu')) return { key: 'xhs', label: '小红书', color: 'bg-pink-50 text-pink-600' };
+      if (category.includes('视频') || url.includes('youtube') || url.includes('youtu.be') || url.includes('bilibili')) return { key: 'video', label: '视频', color: 'bg-red-50 text-red-600' };
+      if (note.type === 'insight') return { key: 'insight', label: '灵感', color: 'bg-purple-50 text-purple-600' };
+      return { key: 'link', label: '链接', color: 'bg-blue-50 text-blue-600' };
+    }
+    function viewModel(note) {
+      const type = noteType(note);
+      return { id: note.id, type: type.key, typeLabel: type.label, typeColor: type.color, title: note.title || '未命名内容', summary: note.summary || '暂无摘要', tags: note.tags || [], keyPoints: note.keyPoints || [], content: note.sourceText || note.body || '', favorite: Boolean(note.favorite), raw: note };
+    }
+    async function api(path, options = {}, retry = true) {
+      const headers = { 'content-type': 'application/json', ...(options.headers || {}) };
+      if (state.token) headers.authorization = `Bearer ${state.token}`;
+      const response = await fetch(path, { ...options, headers });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401 && retry) { await login(); return api(path, options, false); }
+      if (!response.ok) throw new Error(payload.detail || payload.error || '请求失败');
+      return payload;
+    }
+    async function login() {
+      const passcode = localStorage.getItem('smart-note-passcode') || prompt('请输入访问口令') || '';
+      const response = await fetch('/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ passcode }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.token) { localStorage.removeItem('smart-note-passcode'); throw new Error(payload.detail || '口令不正确'); }
+      state.token = payload.token;
+      localStorage.setItem('smart-note-token', payload.token);
+      localStorage.setItem('smart-note-passcode', passcode);
+    }
+    async function loadNotes() { const payload = await api('/api/notes?limit=50'); state.notes = payload.items || []; renderCards(); }
+    function renderCards() {
+      const container = document.getElementById('cards-container');
+      container.querySelectorAll('.note-item').forEach(card => card.remove());
+      state.notes.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).reverse().forEach(note => addCardToList(viewModel(note)));
+      filterCategory(state.filter);
+    }
+    function updateEmptyState() {
+      const emptyState = document.getElementById('empty-state');
+      const visibleCards = [...document.querySelectorAll('.note-item')].filter(card => card.style.display !== 'none');
+      emptyState.style.display = !state.notes.length || !visibleCards.length ? 'block' : 'none';
+      emptyState.querySelector('p').innerHTML = state.notes.length ? '当前分类没有内容<br>换个分类看看' : '还没有笔记<br>粘贴链接开始智能提取';
+    }
+    function addCardToList(data) {
+      const container = document.getElementById('cards-container');
+      const card = document.createElement('div');
+      card.className = 'note-item note-card p-5 rounded-[2rem] bg-white animate-slide-up mb-4';
+      card.dataset.type = data.type;
+      card.dataset.id = data.id;
+      card.innerHTML = `<div class="flex justify-between items-start mb-3"><span class="text-[9px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider ${data.typeColor}">${escapeHtml(data.typeLabel)}</span><i class="${data.favorite ? 'fa-solid text-yellow-400' : 'fa-regular text-gray-200'} fa-star"></i></div><h3 class="font-bold text-gray-800 mb-2 leading-snug">${escapeHtml(data.title)}</h3><p class="text-xs text-gray-400 line-clamp-2">${escapeHtml(data.summary)}</p>`;
+      card.onclick = () => openDetail(data);
+      container.prepend(card);
+      if (state.filter !== 'all' && data.type !== state.filter) card.style.display = 'none';
+      updateEmptyState();
+    }
+    function openDetail(data) {
+      document.getElementById('detail-type').innerText = data.typeLabel;
+      document.getElementById('detail-title').innerText = data.title;
+      document.getElementById('detail-summary').innerText = data.summary;
+      document.getElementById('detail-tags').innerHTML = data.tags.length ? data.tags.map(tag => `<span class="text-[11px] font-bold px-3 py-1.5 rounded-full bg-blue-50 text-blue-500">#${escapeHtml(tag)}</span>`).join('') : '<span class="text-xs text-gray-300">暂无标签</span>';
+      document.getElementById('detail-points').innerHTML = data.keyPoints.length ? `<div class="font-black text-gray-900 mb-2">重点</div><ul class="list-disc pl-5 space-y-2">${data.keyPoints.map(point => `<li>${escapeHtml(point)}</li>`).join('')}</ul>` : '<div class="text-gray-300">暂无重点</div>';
+      document.getElementById('detail-body').innerHTML = formatLongText(data.content);
+      document.getElementById('detail-view').classList.remove('hidden');
+    }
+    async function submitContent() {
+      const url = normalizeUrlInput(document.getElementById('url-input').value);
+      if (!url) return setStatus('请输入有效内容链接', true);
+      setSubmitBusy(true); setStatus('正在解析链接并生成小结...');
+      try {
+        await login();
+        const payload = await api('/api/content', { method: 'POST', body: JSON.stringify({ url, favorite: true }) });
+        const note = payload.item;
+        state.notes = [note, ...state.notes.filter(item => item.id !== note.id)];
+        addCardToList(viewModel(note));
+        closeAddModal();
+        openDetail(viewModel(note));
+      } catch (error) {
+        setStatus(error.message || '解析失败，请稍后再试', true);
+      } finally { setSubmitBusy(false); }
+    }
+    submitButton.onclick = submitContent;
+    document.getElementById('url-input').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submitContent(); });
+    (async function boot() { try { await login(); await loadNotes(); } catch (error) { setStatus(error.message || '加载失败', true); } })();
+  </script>
+</body>
+</html>
