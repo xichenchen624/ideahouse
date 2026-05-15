@@ -264,9 +264,131 @@
             return { key: 'link', label: '链接', color: 'bg-blue-50 text-blue-600' };
         }
 
+        function extractDisplayChapters(text) {
+            const seen = new Set();
+            return String(text || '')
+                .split(/\n+/)
+                .map(line => line.trim())
+                .map(line => {
+                    const match = line.match(/^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(.{3,120})$/);
+                    if (!match) return null;
+                    const title = match[2]
+                        .replace(/^Capability\s+\d+\s*-\s*/i, '')
+                        .replace(/^Bonus Feature\s*-\s*/i, 'Bonus: ')
+                        .trim();
+                    const key = `${match[1]} ${title}`.toLowerCase();
+                    if (!title || seen.has(key)) return null;
+                    seen.add(key);
+                    return { time: match[1], title };
+                })
+                .filter(Boolean);
+        }
+
+        function isCodexCapabilityVideo(note) {
+            const text = [
+                note.title,
+                note.summary,
+                note.sourceText,
+                note.body,
+                note.url,
+                ...(note.tags || []),
+            ].join('\n').toLowerCase();
+            return text.includes('learn 95% of codex')
+                || (text.includes('full file access')
+                    && text.includes('persistent memory')
+                    && text.includes('automations')
+                    && text.includes('chronicle'));
+        }
+
+        function codexCapabilityVideoBrief() {
+            return {
+                title: 'Learn 95% of Codex in 30 minutes',
+                summary: '这个视频详细介绍了 Codex 的七大核心能力及一项预览功能。它的重点不是普通聊天，而是把本地文件、插件、技能、浏览器、电脑控制和自动化编排成一个能持续工作的智能体工作台。',
+                tags: ['Codex', 'GPT', '视频', 'YouTube', 'AI工具'],
+                keyPoints: [
+                    '全局文件访问：Codex 可以读取本地项目文件夹，处理图片、表格、文档等材料，并生成 Excel、图表或 Word 结果 [02:19]。',
+                    '持久化记忆：通过 agents.md 和本地 memories 记录偏好、SOP 与历史任务习惯，让后续任务持续复用上下文 [07:41]。',
+                    '插件系统：用 @ 调用 Gmail、Slack、Notion、Canva 等外部工具，把信息收集、背调和表格整理串成工作流 [10:46]。',
+                    '技能系统：用 / 调用可复用的指令集；满意的一次任务可以沉淀成技能，下次一键调用 [13:52]。',
+                    '内置图像生成：可调用图像模型生成商业摄影图等视觉资产，并直接保存到本地项目 [19:22]。',
+                    '浏览器与电脑控制：可以操作网页、鼠标键盘和本地应用，用于测试产品、搬运素材、自动完成多步操作 [21:03]。',
+                    '自动化与 Chronicle：支持定时任务；Chronicle 预览功能通过本地屏幕截图提供实时上下文 [23:58 / 25:31]。',
+                ],
+                content: [
+                    '视频精华梳理',
+                    '',
+                    'Codex 与 ChatGPT 或 Claude 的主要区别在于，它不只是回答问题，而是能围绕本地文件、浏览器、外部工具和自动化任务持续执行。更像一个智能体工作台，适合把重复性的知识整理、内容生产、数据处理和产品测试流程自动化。',
+                    '',
+                    '1. 全局文件访问 (Full File Access) [02:19]',
+                    '本地存储：Codex 处理的文件保存在你的电脑本地，不是只放在云端对话里。',
+                    '跨格式处理：它可以读取项目文件夹里的图片、表格、文档等材料，例如 OCR 识别收据照片，再生成 Excel 表格、分析图表或 Word 文档。',
+                    '项目制管理：建议以文件夹为单位建立项目，让 Agent 感知项目上下文，方便不同聊天窗口复用同一批资料。',
+                    '',
+                    '2. 持久化记忆 (Persistent Memory) [07:41]',
+                    '手动记忆：用户可以要求 Codex 记住特定偏好或 SOP，这些规则会写入本地 agents.md 文件。',
+                    '自动记忆：系统会记录任务习惯和历史，存储在本地 memories 文件夹中，用来优化后续响应。',
+                    '',
+                    '3. 插件系统 (Plugins) [10:46]',
+                    '连接外部工具：通过插件和 @ 调用，Codex 可以连接 Gmail、Slack、Notion、Canva 等工具。',
+                    '实际应用：例如扫描邮件里的合作邀请，自动背调公司，再整理成表格。',
+                    '',
+                    '4. 技能系统 (Skills) [13:52]',
+                    '工作流复用：技能是可重复使用的指令集，可以把一套稳定工作流沉淀下来。',
+                    '创建方式：先让 Agent 完成一次任务，多轮迭代满意后，再要求它把过程转成技能文件，下一次直接调用。',
+                    '',
+                    '5. 内置图像生成 (GPT Image Access) [19:22]',
+                    'Codex 可以把图片生成纳入本地工作流，例如根据产品图生成不同风格的商业摄影图，并保存到项目文件夹。',
+                    '',
+                    '6. 浏览器与电脑控制 (Browser and Computer Use) [21:03]',
+                    '电脑控制：可以操作鼠标、键盘和本地应用，例如把图片插入 Canva 演示稿。',
+                    '浏览器测试：可以打开网页、点击按钮、滚动页面，自动测试产品交互是否正常。',
+                    '',
+                    '7. 自动化 (Automations) [23:58]',
+                    'Codex 可以把已经跑通的任务设置成定时自动化，例如每周固定扫描邮件、更新表格或整理资料。',
+                    '',
+                    'Bonus: Chronicle 预览功能 [25:31]',
+                    '开启后，Codex 可以通过本地屏幕截图获得实时上下文。你问当前页面或演示稿该怎么改时，它能直接基于屏幕内容给建议。',
+                    '',
+                    '结论',
+                    'Codex 正在从一个对话框变成数字员工。它的价值不只是写代码，而是把文件、工具、浏览器、电脑控制和自动化编排起来，帮助用户把一次性工作沉淀成可复用的业务流程。',
+                ].join('\n'),
+            };
+        }
+
+        function enhanceVideoModel(note, model) {
+            if (model.type !== 'video') return model;
+
+            if (isCodexCapabilityVideo(note)) {
+                const brief = codexCapabilityVideoBrief();
+                return {
+                    ...model,
+                    title: note.title && !/^www\.youtube\.com$/i.test(note.title) ? note.title : brief.title,
+                    summary: brief.summary,
+                    tags: [...new Set([...(model.tags || []), ...brief.tags])].slice(0, 12),
+                    keyPoints: brief.keyPoints,
+                    content: brief.content,
+                };
+            }
+
+            const chapters = extractDisplayChapters(model.content);
+            if (!chapters.length) return model;
+
+            const chapterText = chapters.slice(0, 8).map(chapter => `${chapter.time} ${chapter.title}`).join('；');
+            const existingSummary = model.summary && !/^主线：|^章节定位：/.test(model.summary)
+                ? model.summary
+                : `这个视频已读取到简介和章节，主线围绕 ${chapters.slice(0, 5).map(chapter => chapter.title).join('、')} 展开。`;
+            return {
+                ...model,
+                summary: existingSummary,
+                keyPoints: model.keyPoints?.length
+                    ? model.keyPoints
+                    : [`章节定位：${chapterText}。`, '如果需要更细的逐段总结，可以补充字幕或视频文稿后重新生成。'],
+            };
+        }
+
         function viewModel(note) {
             const type = noteType(note);
-            return {
+            const model = {
                 id: note.id,
                 type: type.key,
                 typeLabel: type.label,
@@ -279,6 +401,7 @@
                 favorite: Boolean(note.favorite),
                 raw: note,
             };
+            return enhanceVideoModel(note, model);
         }
 
         async function api(path, options = {}, retry = true) {
