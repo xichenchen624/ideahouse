@@ -36,6 +36,13 @@ npm start
 - `GITHUB_BRANCH`：通常是 `main`
 - `GITHUB_DATA_PATH`：默认 `remote-data/notes.enc.json`
 - `GITHUB_KB_PREFIX`：默认 `kb/智慧笔记摘要本`
+- `ALLOW_TEMP_STORE`：长期线上版不要开启；只有临时演示才设为 `true`
+
+长期存储验收标准：
+
+- 打开 `/api/health` 时，`storage.store` 应该是 `github`
+- `storage.durable` 应该是 `true`
+- 添加笔记后，仓库中会出现加密数据文件 `remote-data/notes.enc.json`
 
 部署流程：
 
@@ -44,6 +51,12 @@ npm start
 3. Framework 选择 `Other` 或保留默认静态项目识别。
 4. 添加上面的环境变量。
 5. Deploy。
+
+GitHub Token 建议使用 fine-grained token：
+
+- Repository access：只选择当前仓库
+- Permissions：Contents 选择 `Read and write`
+- 过期时间：先设 90 天或 180 天，后续可轮换
 
 部署后，手机直接打开 Vercel 生成的 HTTPS 地址即可。
 
