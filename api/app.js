@@ -9,6 +9,27 @@ const INSIGHT_PATCH = String.raw`
       .find((element) => element.textContent && element.textContent.includes("灵感"));
   }
 
+  function isDoubaoUrl(url) {
+    try {
+      return new URL(url).hostname.includes("doubao");
+    } catch {
+      return false;
+    }
+  }
+
+  function ensureDoubaoTab() {
+    const tabBar = document.querySelector(".tab-btn") && document.querySelector(".tab-btn").parentElement;
+    if (!tabBar || document.querySelector('[data-tab="doubao"]')) return;
+    const button = document.createElement("button");
+    button.dataset.tab = "doubao";
+    button.className = "tab-btn px-5 py-2 bg-gray-100 text-gray-500 rounded-2xl text-xs font-bold";
+    button.textContent = "豆包";
+    button.onclick = function (event) {
+      if (typeof window.filterCategory === "function") window.filterCategory("doubao", event);
+    };
+    tabBar.appendChild(button);
+  }
+
   function elements() {
     const modal = document.getElementById("add-modal");
     const urlInput = document.getElementById("url-input");
@@ -240,6 +261,7 @@ const INSIGHT_PATCH = String.raw`
   }
 
   function bind() {
+    ensureDoubaoTab();
     const insightNav = findInsightNav();
     if (insightNav) {
       insightNav.onclick = window.openInsightModal;
@@ -439,6 +461,40 @@ const INSIGHT_PATCH = String.raw`
   function bindDetailPatch() {
     if (window.__smartNoteDetailPatch) return;
     window.__smartNoteDetailPatch = true;
+    const originalApi = typeof api === "function" ? api : null;
+    if (originalApi && !window.__smartNoteDoubaoApiPatch) {
+      window.__smartNoteDoubaoApiPatch = true;
+      api = function patchedApi(path, options, retry) {
+        const nextOptions = { ...(options || {}) };
+        if (String(path || "") === "/api/content" && nextOptions.body) {
+          try {
+            const body = JSON.parse(nextOptions.body);
+            if (isDoubaoUrl(body.url)) {
+              body.category = body.category || "豆包";
+              body.tags = [...new Set([...(Array.isArray(body.tags) ? body.tags : []), "豆包"])];
+              nextOptions.body = JSON.stringify(body);
+            }
+          } catch {}
+        }
+        return originalApi(path, nextOptions, retry);
+      };
+      window.api = api;
+    }
+    const originalViewModel = typeof viewModel === "function" ? viewModel : null;
+    if (originalViewModel && !window.__smartNoteDoubaoViewPatch) {
+      window.__smartNoteDoubaoViewPatch = true;
+      viewModel = function patchedViewModel(note) {
+        const model = originalViewModel(note);
+        const category = note && (note.category || note.coreInfo && note.coreInfo.sourceType || "");
+        if (String(category).includes("豆包") || isDoubaoUrl(note && note.url || "")) {
+          model.type = "doubao";
+          model.typeLabel = "豆包";
+          model.typeColor = "bg-orange-50 text-orange-600";
+        }
+        return model;
+      };
+      window.viewModel = viewModel;
+    }
     const originalOpenDetail = typeof openDetail === "function" ? openDetail : null;
     if (originalOpenDetail) {
       openDetail = function patchedOpenDetail(data) {
