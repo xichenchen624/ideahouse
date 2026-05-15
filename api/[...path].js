@@ -50,8 +50,28 @@ function blockInvalidGitHubToken(req, res, url) {
   return false;
 }
 
+function patchWeChatFetchTimeout() {
+  const marker = Symbol.for("smart-note.wechat-fetch-timeout-patched");
+  if (globalThis[marker]) return;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (resource, options = {}) => {
+    const href = typeof resource === "string" ? resource : resource?.url || String(resource || "");
+    if (href.includes("mp.weixin.qq.com")) {
+      const headers = {
+        ...(options.headers || {}),
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.47",
+        accept: "text/html,application/xhtml+xml,text/plain",
+      };
+      return originalFetch(resource, { ...options, headers, signal: undefined });
+    }
+    return originalFetch(resource, options);
+  };
+  globalThis[marker] = true;
+}
+
 export default async function handler(req, res) {
   trimConfigEnv();
+  patchWeChatFetchTimeout();
   const url = new URL(req.url || "/", `https://${req.headers.host || "localhost"}`);
   if (blockInvalidGitHubToken(req, res, url)) return;
   const { handleApi } = await import("../server.js");
