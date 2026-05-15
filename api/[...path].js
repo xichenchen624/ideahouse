@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
+
 function trimConfigEnv() {
-  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_DATA_PATH", "GITHUB_KB_PREFIX"]) {
+  for (const key of ["GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_DATA_PATH", "GITHUB_KB_PREFIX", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"]) {
     if (process.env[key]) process.env[key] = String(process.env[key]).trim();
   }
 }
@@ -16,6 +18,132 @@ function sendJson(res, status, payload) {
     "content-length": Buffer.byteLength(body),
   });
   res.end(body);
+}
+
+function cleanText(input) {
+  return String(input || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function signPayload(payload) {
+  const secret = process.env.APP_SECRET || process.env.APP_PASSCODE || "local-dev-secret-change-me";
+  return crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+}
+
+function verifySessionToken(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) return false;
+  const expected = signPayload(payload);
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return false;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return Number(data.exp || 0) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function hasSession(req) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  return verifySessionToken(token);
+}
+
+function requestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 200_000) {
+        reject(new Error("payload_too_large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error("invalid_json"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function outputText(payload) {
+  if (typeof payload?.output_text === "string") return payload.output_text;
+  const parts = [];
+  for (const item of payload?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === "string") parts.push(content.text);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+async function handleExpand(req, res) {
+  if (!hasSession(req)) {
+    sendJson(res, 401, { error: "unauthorized", detail: "需要登录后访问" });
+    return true;
+  }
+  const body = await requestBody(req);
+  const text = cleanText(body.text || body.body || "");
+  if (!text) {
+    sendJson(res, 422, { error: "missing_content", detail: "请先写下要扩写的灵感内容" });
+    return true;
+  }
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  const model = String(process.env.OPENAI_MODEL || "gpt-5.5").trim() || "gpt-5.5";
+  const baseUrl = String(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  if (!apiKey) {
+    sendJson(res, 503, { error: "ai_not_configured", detail: "AI 扩写还没配置：请在 Vercel 环境变量里添加 OPENAI_API_KEY。" });
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 18_000);
+  try {
+    const prompt = [
+      "你是一个中文知识整理助手。请把用户写下的灵感扩写成一篇可直接保存到知识库的结构化笔记。",
+      "",
+      "要求：保留用户原意，不编造事实；结构固定为：一句话观点、展开说明、可执行动作、待验证问题；段落之间留空行；总长度 600-1200 字；直接输出正文。",
+      "",
+      "用户原始灵感：",
+      text.slice(0, 6000),
+    ].join("\n");
+    const response = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model, input: prompt, max_output_tokens: 1600 }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      sendJson(res, 502, { error: "ai_expand_failed", detail: payload?.error?.message || `OpenAI 请求失败：${response.status}` });
+      return true;
+    }
+    const expandedText = cleanText(outputText(payload));
+    if (!expandedText) {
+      sendJson(res, 502, { error: "ai_empty_output", detail: "模型没有返回可用内容，请稍后重试。" });
+      return true;
+    }
+    sendJson(res, 200, { expandedText, model });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, { error: "ai_expand_failed", detail: error?.name === "AbortError" ? "AI 扩写超时，请稍后重试。" : error?.message || "AI 扩写失败，请稍后再试" });
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function blockInvalidGitHubToken(req, res, url) {
@@ -148,6 +276,9 @@ export default async function handler(req, res) {
   trimConfigEnv();
   patchWeChatFetchTimeout();
   const url = new URL(req.url || "/", `https://${req.headers.host || "localhost"}`);
+  if (req.method === "POST" && url.pathname === "/api/expand") {
+    if (await handleExpand(req, res)) return;
+  }
   if (blockInvalidGitHubToken(req, res, url)) return;
   const { handleApi } = await import("../server.js");
   try {
