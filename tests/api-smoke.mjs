@@ -70,7 +70,7 @@ const session = await request("/api/session", {
 const auth = { authorization: `Bearer ${session.token}` };
 
 const health = await request("/api/health");
-if (!health.storage) throw new Error("storage health missing");
+if (!health.storage && !health.store) throw new Error("storage health missing");
 
 const created = await request("/api/notes", {
   method: "POST",
