@@ -73,13 +73,28 @@ function patchWeChatFetchTimeout() {
 function imageUrlsFromHtml(html) {
   const urls = [];
   const seen = new Set();
-  for (const match of String(html || "").matchAll(/<img\b[^>]*>/gi)) {
-    const tag = match[0];
-    const src = attr(tag, "data-src") || attr(tag, "data-original") || attr(tag, "data-backsrc") || attr(tag, "src");
-    const url = normalizeImageUrl(src);
-    if (!url || seen.has(url)) continue;
+  const push = (value) => {
+    const url = normalizeImageUrl(value);
+    if (!url || seen.has(url)) return;
     seen.add(url);
     urls.push(url);
+  };
+
+  for (const match of String(html || "").matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const src = attr(tag, "data-src")
+      || attr(tag, "data-original")
+      || attr(tag, "data-backsrc")
+      || attr(tag, "data-croporisrc")
+      || attr(tag, "src");
+    push(src);
+    const srcset = attr(tag, "srcset") || attr(tag, "data-srcset");
+    for (const candidate of srcset.split(",")) push(candidate.trim().split(/\s+/)[0]);
+    if (urls.length >= 10) break;
+  }
+
+  for (const match of String(html || "").matchAll(/property=["'](?:og:image|twitter:image)["'][^>]*content=["']([^"']+)/gi)) {
+    push(match[1]);
     if (urls.length >= 10) break;
   }
   return urls;
@@ -104,11 +119,18 @@ async function withWeChatImageHints(response) {
   const html = await response.text();
   const imageUrls = imageUrlsFromHtml(html);
   if (!imageUrls.length) return makeHtmlResponse(html, response);
+  const imageHintHtml = `<section id="smart_note_image_hints"><p>图片：</p>${imageUrls.map((url) => `<p>${url}</p>`).join("")}</section>`;
   const openTag = /<[^>]+id=["']js_content["'][^>]*>/i.exec(html);
-  if (!openTag) return makeHtmlResponse(html, response);
-  const insertAt = openTag.index + openTag[0].length;
-  const imageHintHtml = `<p>图片：</p>${imageUrls.map((url) => `<p>${url}</p>`).join("")}`;
-  return makeHtmlResponse(`${html.slice(0, insertAt)}${imageHintHtml}${html.slice(insertAt)}`, response);
+  if (openTag) {
+    const insertAt = openTag.index + openTag[0].length;
+    return makeHtmlResponse(`${html.slice(0, insertAt)}${imageHintHtml}${html.slice(insertAt)}`, response);
+  }
+  const bodyTag = /<body[^>]*>/i.exec(html);
+  if (bodyTag) {
+    const insertAt = bodyTag.index + bodyTag[0].length;
+    return makeHtmlResponse(`${html.slice(0, insertAt)}${imageHintHtml}${html.slice(insertAt)}`, response);
+  }
+  return makeHtmlResponse(`${imageHintHtml}${html}`, response);
 }
 
 function makeHtmlResponse(html, sourceResponse) {
